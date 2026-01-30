@@ -31,9 +31,10 @@ def parse_config():
     parser.add_argument("--future_len", type=int, default=12, help="length of future (in timesteps)")
     parser.add_argument("--dim_embedding_key", type=int, default=128)
 
-    # Configuration for SDD dataset.
+    # Configuration for datasets.
     parser.add_argument("--dataset_name", type=str, default='sdd')
     parser.add_argument("--data_scene", type=str, default='eth')
+    parser.add_argument("--data_root", type=str, default='data')
     parser.add_argument("--data_scale", type=float, default=1)
     parser.add_argument("--data_scale_old", type=float, default=1.86)
     parser.add_argument("--train_b_size", type=int, default=512)

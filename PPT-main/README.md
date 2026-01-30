@@ -78,6 +78,12 @@ After the preparation work, the whole project should has the following structure
 │   │   └── ...
 │   ├── social_sdd_test_4096_0_100.pickle
 │   └── social_sdd_train_512_0_100.pickle
+│   ├── jaad
+│   │   ├── train.pkl
+│   │   └── test.pkl
+│   └── pie
+│       ├── train.pkl
+│       └── test.pkl
 ├── models                          # core models
 │   ├── layer_utils.py
 │   ├── model.py
@@ -104,6 +110,65 @@ After the preparation work, the whole project should has the following structure
            └── ...
     
 ```
+
+#### JAAD/PIE data format
+To use the JAAD/PIE datasets, prepare `train.pkl` and `test.pkl` (or `.npz`) under
+`data/jaad` and `data/pie`. Each file should contain one of the following payloads:
+
+* **Dict payload** with keys:
+  * `trajectories`: array shaped `[num_samples, num_agents, seq_len, 2]`
+  * `masks`: array shaped `[num_samples, num_agents, num_agents]` describing scene membership
+  * `seq_start_end` (optional): list of `(start, end)` pairs per sample
+  * `initial_pos` (optional): array shaped `[num_samples, num_agents, 2]`
+* **Tuple/List payload**:
+  * `(trajectories, masks)` or `(trajectories, masks, seq_start_end[, initial_pos])`
+
+If `seq_start_end` or `initial_pos` are not provided, they are derived automatically in the loader.
+Set `--dataset_name jaad` or `--dataset_name pie` and optionally override `--data_root` if your
+data is stored elsewhere.
+
+#### JAAD/PIE preprocessing template
+We provide a template script to convert per-frame annotations into the expected payload:
+
+```linux
+python tools/prepare_jaad_pie.py \
+  --input_csv /path/to/jaad_or_pie.csv \
+  --output_dir data/jaad \
+  --split train \
+  --obs_len 8 \
+  --pred_len 12 \
+  --stride 1
+```
+
+The CSV must include `scene_id`, `frame_id`, `track_id`, `x`, and `y` columns
+(rename via `--scene_col`, `--frame_col`, `--track_col`, `--x_col`, `--y_col`).
+
+#### JAAD/PIE standard input format & normalization strategy
+**Standard input format (recommended):**
+
+* **Coordinates**: use the pedestrian center in image space `(x, y)` for each frame.
+* **Sequence length**: `seq_len = obs_len + pred_len` (default 8 + 12 = 20).
+* **Payload**: follow the dict/tuple formats above (`trajectories`, `masks`, optional
+  `seq_start_end` and `initial_pos`). The template script outputs this structure.
+
+**Normalization strategy (choose one and stay consistent):**
+
+1. **Image-size normalization (recommended for JAAD/PIE):**
+   * `x_norm = x / image_width`, `y_norm = y / image_height`
+   * Store normalized coordinates directly in `trajectories`.
+   * Use the same normalization during evaluation/visualization.
+2. **Fixed-scale normalization (if you do not have frame size per sample):**
+   * Use a constant scale factor (e.g., `scale=1/1000` or `1/1920`).
+   * Keep the same scale for train/test/val and report the scale in experiments.
+3. **Per-sequence centering (optional augmentation):**
+   * Subtract the last observed position from every timestep inside each sequence:
+     `traj_centered = traj - traj[:, obs_len - 1:obs_len, :]`.
+   * This is already applied inside the model pipeline; do not double-center in preprocessing.
+
+**Notes:**
+* For JAAD/PIE, keep coordinates in the image plane unless you have calibrated
+  camera parameters to convert to world coordinates.
+* If you add vehicles later, use the same normalization policy for all agent types.
 
 ### II. Training
 
