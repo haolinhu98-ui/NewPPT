@@ -36,6 +36,7 @@ def parse_config():
     parser.add_argument("--dataset_file", default="SDD", help="dataset file")
     parser.add_argument("--dataset_name", default="sdd", help="dataset file")
     parser.add_argument("--data_scene", default="eth", help="dataset file")
+    parser.add_argument("--data_root", type=str, default='data')
     parser.add_argument("--info", type=str, default='', help='Name of training. '
                                                              'It will be used in tensorboard log and test folder')
 

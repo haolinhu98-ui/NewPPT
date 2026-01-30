@@ -1,4 +1,5 @@
 import glob
+import os
 import pickle
 import torch
 from torch.utils import data
@@ -18,6 +19,33 @@ def initial_pos_func(traj_batches):
 		batches.append(starting_pos)
 
 	return batches
+
+
+def initial_pos_from_past(traj_batches, past_len):
+	batches = []
+	past_index = max(past_len - 1, 0)
+	for batch in traj_batches:
+		starting_pos = batch[:, past_index, :].copy()
+		batches.append(starting_pos)
+	return batches
+
+
+def build_seq_start_end_from_masks(masks):
+	seq_start_end_list = []
+	for m in masks:
+		total_num = m.shape[0]
+		scene_start_idx = 0
+		num_list = []
+		for i in range(total_num):
+			if i < scene_start_idx:
+				continue
+			scene_actor_num = np.sum(m[i])
+			scene_start_idx += scene_actor_num
+			num_list.append(scene_actor_num)
+		cum_start_idx = [0] + np.cumsum(np.array(num_list)).tolist()
+		seq_start_end = [(start, end) for start, end in zip(cum_start_idx, cum_start_idx[1:])]
+		seq_start_end_list.append(seq_start_end)
+	return seq_start_end_list
 
 
 class SocialDataset(data.Dataset):
@@ -88,6 +116,75 @@ class SocialDataset(data.Dataset):
 		self.seq_start_end_batches = seq_start_end_list
 		if verbose:
 			print("Initialized social dataloader...")
+
+	def __len__(self):
+		return len(self.trajectory_batches)
+
+	def __getitem__(self, idx):
+		trajectory = self.trajectory_batches[idx]
+		mask = self.mask_batches[idx]
+		initial_pos = self.initial_pos_batches[idx]
+		seq_start_end = self.seq_start_end_batches[idx]
+		return np.array(trajectory), np.array(mask), np.array(initial_pos), np.array(seq_start_end)
+
+
+class JAADPIEDataset(data.Dataset):
+	def __init__(self, root_dir, dataset_name, set_name="train", past_len=8, verbose=False):
+		self.dataset_name = dataset_name
+		self.set_name = set_name
+		self.past_len = past_len
+
+		pkl_path = os.path.join(root_dir, f"{set_name}.pkl")
+		npz_path = os.path.join(root_dir, f"{set_name}.npz")
+
+		if os.path.exists(pkl_path):
+			with open(pkl_path, "rb") as f:
+				payload = pickle.load(f)
+		elif os.path.exists(npz_path):
+			payload = np.load(npz_path, allow_pickle=True)
+		else:
+			raise FileNotFoundError(
+				f"Could not find JAAD/PIE data for split '{set_name}'. "
+				f"Expected {pkl_path} or {npz_path}."
+			)
+
+		trajectories, masks, seq_start_end, initial_pos = self._unpack_payload(payload)
+
+		self.trajectory_batches = np.asarray(trajectories)
+		self.mask_batches = np.asarray(masks)
+
+		if seq_start_end is None:
+			seq_start_end = build_seq_start_end_from_masks(self.mask_batches)
+		self.seq_start_end_batches = seq_start_end
+
+		if initial_pos is None:
+			initial_pos = initial_pos_from_past(self.trajectory_batches, self.past_len)
+		self.initial_pos_batches = np.asarray(initial_pos)
+
+		if verbose:
+			print(f"Initialized {dataset_name.upper()} dataloader with {len(self.trajectory_batches)} samples.")
+
+	def _unpack_payload(self, payload):
+		trajectories = masks = seq_start_end = initial_pos = None
+		if isinstance(payload, dict):
+			trajectories = payload.get("trajectories")
+			masks = payload.get("masks")
+			seq_start_end = payload.get("seq_start_end")
+			initial_pos = payload.get("initial_pos")
+		elif isinstance(payload, (list, tuple)):
+			if len(payload) >= 2:
+				trajectories, masks = payload[0], payload[1]
+			if len(payload) >= 3:
+				seq_start_end = payload[2]
+			if len(payload) >= 4:
+				initial_pos = payload[3]
+		else:
+			raise ValueError("Unsupported JAAD/PIE payload format. Use dict or tuple/list.")
+
+		if trajectories is None or masks is None:
+			raise ValueError("JAAD/PIE payload must include trajectories and masks.")
+
+		return trajectories, masks, seq_start_end, initial_pos
 
 	def __len__(self):
 		return len(self.trajectory_batches)

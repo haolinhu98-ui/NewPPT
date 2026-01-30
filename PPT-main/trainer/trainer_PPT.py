@@ -61,13 +61,19 @@ class Trainer:
 
         # Initialize dataloaders
         if config.dataset_name == 'sdd':
-            data_folder = 'data'
+            data_folder = config.data_root
             train_dataset = SocialDataset(data_folder, set_name="train", b_size=512, t_tresh=0, d_tresh=100, scene='sdd')
             val_dataset = SocialDataset(data_folder, set_name="test", b_size=4096, t_tresh=0, d_tresh=100, scene='sdd')
         elif config.dataset_name == 'eth':
-            data_folder = 'data/ETH_UCY'
+            data_folder = os.path.join(config.data_root, 'ETH_UCY')
             train_dataset = SocialDataset(data_folder, set_name="train", b_size=256, t_tresh=0, d_tresh=50, scene=config.data_scene)
             val_dataset = SocialDataset(data_folder, set_name="test", b_size=256, t_tresh=0, d_tresh=50, scene=config.data_scene)
+        elif config.dataset_name in {'jaad', 'pie'}:
+            data_folder = os.path.join(config.data_root, config.dataset_name)
+            train_dataset = JAADPIEDataset(data_folder, config.dataset_name, set_name="train", past_len=config.past_len)
+            val_dataset = JAADPIEDataset(data_folder, config.dataset_name, set_name="test", past_len=config.past_len)
+        else:
+            raise ValueError(f"Unsupported dataset_name: {config.dataset_name}")
 
         self.train_loader = DataLoader(train_dataset, batch_size=1, collate_fn=socialtraj_collate, shuffle=True)
         self.val_loader = DataLoader(val_dataset, batch_size=1, collate_fn=socialtraj_collate)

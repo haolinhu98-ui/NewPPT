@@ -24,11 +24,16 @@ class Trainer:
 
         # Initialize dataloaders
         if config.dataset_name == 'sdd':
-            data_folder = 'data'
+            data_folder = config.data_root
             test_dataset = SocialDataset(data_folder, set_name="test", b_size=4096, t_tresh=0, d_tresh=100, scene='sdd')
         elif config.dataset_name == 'eth':
-            data_folder = 'data/ETH_UCY'
+            data_folder = os.path.join(config.data_root, 'ETH_UCY')
             test_dataset = SocialDataset(data_folder, set_name="test", b_size=4096, t_tresh=0, d_tresh=50, scene=config.data_scene)
+        elif config.dataset_name in {'jaad', 'pie'}:
+            data_folder = os.path.join(config.data_root, config.dataset_name)
+            test_dataset = JAADPIEDataset(data_folder, config.dataset_name, set_name="test", past_len=config.past_len)
+        else:
+            raise ValueError(f"Unsupported dataset_name: {config.dataset_name}")
 
         if config.vis and config.dataset_name == 'eth':
             self.homo_mat = {}
