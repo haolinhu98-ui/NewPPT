@@ -5,8 +5,12 @@ def evaluate_ST(dataset, model, config, device):
     samples = 0
 
     with torch.no_grad():
-        for (trajectory, mask, initial_pos, seq_start_end) in dataset:
-            trajectory, mask, initial_pos = torch.FloatTensor(trajectory).to(device), torch.FloatTensor(mask).to(device), torch.FloatTensor(initial_pos).to(device)
+        for (trajectory, mask, initial_pos, seq_start_end, map_tensor) in dataset:
+            trajectory = torch.FloatTensor(trajectory).to(device)
+            mask = torch.FloatTensor(mask).to(device)
+            initial_pos = torch.FloatTensor(initial_pos).to(device)
+            if map_tensor is not None:
+                map_tensor = torch.FloatTensor(map_tensor).to(device)
             # traj (B, T, 2)
             traj_norm = trajectory - trajectory[:, config.past_len - 1:config.past_len, :]
             x = traj_norm[:, :config.past_len, :]
@@ -17,7 +21,7 @@ def evaluate_ST(dataset, model, config, device):
             initial_pose = trajectory[:, config.past_len-1, :]
             abs_past = trajectory[:, :config.past_len, :]
 
-            output = model(traj_norm[:, :-1], abs_past, seq_start_end, initial_pose)
+            output = model(traj_norm[:, :-1], abs_past, seq_start_end, initial_pose, map_tensor=map_tensor)
             output = output.data
 
             distances = torch.norm(output - traj_norm[:, 1:], dim=2)
@@ -34,8 +38,12 @@ def evaluate_LT(dataset, model, config, device):
     samples = 0
 
     with torch.no_grad():
-        for (trajectory, mask, initial_pos, seq_start_end) in dataset:
-            trajectory, mask, initial_pos = torch.FloatTensor(trajectory).to(device), torch.FloatTensor(mask).to(device), torch.FloatTensor(initial_pos).to(device)
+        for (trajectory, mask, initial_pos, seq_start_end, map_tensor) in dataset:
+            trajectory = torch.FloatTensor(trajectory).to(device)
+            mask = torch.FloatTensor(mask).to(device)
+            initial_pos = torch.FloatTensor(initial_pos).to(device)
+            if map_tensor is not None:
+                map_tensor = torch.FloatTensor(map_tensor).to(device)
 
             traj_norm = trajectory - trajectory[:, config.past_len - 1:config.past_len, :]
             x = traj_norm[:, :config.past_len, :]
@@ -45,7 +53,7 @@ def evaluate_LT(dataset, model, config, device):
             initial_pose = trajectory[:, config.past_len-1, :]
             abs_past = trajectory[:, :config.past_len, :]
 
-            output_des = model(x, abs_past, seq_start_end, initial_pose)
+            output_des = model(x, abs_past, seq_start_end, initial_pose, map_tensor=map_tensor)
             output_des = output_des.data
 
             # print(output_des.shape, des.shape)
@@ -66,8 +74,12 @@ def evaluate_trajectory(dataset, model, config, device):
     dict_metrics = {}
 
     with torch.no_grad():
-        for (trajectory, mask, initial_pos, seq_start_end) in dataset:
-            trajectory, mask, initial_pos = torch.FloatTensor(trajectory).to(device), torch.FloatTensor(mask).to(device), torch.FloatTensor(initial_pos).to(device)
+        for (trajectory, mask, initial_pos, seq_start_end, map_tensor) in dataset:
+            trajectory = torch.FloatTensor(trajectory).to(device)
+            mask = torch.FloatTensor(mask).to(device)
+            initial_pos = torch.FloatTensor(initial_pos).to(device)
+            if map_tensor is not None:
+                map_tensor = torch.FloatTensor(map_tensor).to(device)
 
             traj_norm = trajectory - trajectory[:, config.past_len-1:config.past_len, :]
             x = traj_norm[:, :config.past_len, :]
@@ -76,7 +88,7 @@ def evaluate_trajectory(dataset, model, config, device):
             initial_pose = trajectory[:, config.past_len-1, :]
             abs_past = trajectory[:, :config.past_len, :]
 
-            output = model.get_trajectory(x, abs_past, seq_start_end, initial_pose)
+            output = model.get_trajectory(x, abs_past, seq_start_end, initial_pose, map_tensor=map_tensor)
             output = output.data
             # print(output.shape)
 

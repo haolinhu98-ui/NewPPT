@@ -134,6 +134,28 @@ class Social_Batch_Attention(nn.Module):
         return y
 
 
+class SemanticMapEncoder(nn.Module):
+    def __init__(self, in_channels, embed_dim):
+        super().__init__()
+        self.encoder = nn.Sequential(
+            nn.Conv2d(in_channels, 32, kernel_size=3, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(64, 128, kernel_size=3, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True),
+            nn.AdaptiveAvgPool2d((1, 1)),
+        )
+        self.proj = nn.Linear(128, embed_dim)
+
+    def forward(self, map_tensor):
+        features = self.encoder(map_tensor)
+        features = features.flatten(1)
+        return self.proj(features)
+
 
 class Block(nn.Module):
     """ an unassuming Transformer block """
@@ -314,6 +336,13 @@ class Final_Model(nn.Module):
         self.past_len = config.past_len
         self.future_len = config.future_len
         self.mode = config.mode
+        self.use_semantic_map = getattr(config, "use_semantic_map", False)
+
+        if self.use_semantic_map:
+            self.map_encoder = SemanticMapEncoder(
+                in_channels=config.map_channels,
+                embed_dim=config.n_embd,
+            )
 
         assert self.mode in ['Short_term', 'Des_warm', 'Long_term', 'ALL'], 'WRONG MODE!'
 
@@ -353,13 +382,28 @@ class Final_Model(nn.Module):
                     self.traj_transform_traj = nn.Linear(config.n_embd, config.n_embd)
                     self.traj_transform_des = nn.Linear(config.n_embd, config.n_embd)
 
+        if self.use_semantic_map:
+            for p in self.map_encoder.parameters():
+                p.requires_grad = True
+
     
-    def get_trajectory(self, past, abs_past, seq_start_end, end_pose):
+    def _encode_map(self, map_tensor):
+        if not self.use_semantic_map or map_tensor is None:
+            return None
+        return self.map_encoder(map_tensor)
+
+    def _apply_map_feat(self, tokens, map_feat):
+        if map_feat is None:
+            return tokens
+        return tokens + map_feat.unsqueeze(1)
+
+    def get_trajectory(self, past, abs_past, seq_start_end, end_pose, map_tensor=None):
         predictions = torch.Tensor().cuda()
 
-        past_state = self.Traj_encoder(past)
+        map_feat = self._encode_map(map_tensor)
+        past_state = self._apply_map_feat(self.Traj_encoder(past), map_feat)
         des_token = repeat(self.rand_token, '() n d -> b n d', b=past.size(0))
-        des_state = self.des_encoder(des_token)
+        des_state = self._apply_map_feat(self.des_encoder(des_token), map_feat)
         traj_state = torch.cat((past_state, des_state), dim=1)
         feat = self.AR_Model(traj_state)
         pred_des = self.predictor_Des(feat[:, -1])
@@ -369,9 +413,9 @@ class Final_Model(nn.Module):
         for i in range(20):
             fut_token = repeat(self.traj_rand_fut_token, '() n d -> b n d', b=past.size(0))
 
-            past_feat = self.traj_encoder(past)
+            past_feat = self._apply_map_feat(self.traj_encoder(past), map_feat)
             fut_feat = self.traj_fut_token_encoder(fut_token)
-            des_feat = self.traj_encoder(destination_prediction[:, i])
+            des_feat = self._apply_map_feat(self.traj_encoder(destination_prediction[:, i]), map_feat)
             traj_feat = torch.cat((past_feat, fut_feat, des_feat.unsqueeze(1)), 1)
             prediction_feat = self.traj_trans_layer(traj_feat, mask_type='all')
 
@@ -387,25 +431,26 @@ class Final_Model(nn.Module):
         return predictions
 
 
-    def forward(self, past, abs_past, seq_start_end, end_pose, destination=None, epoch=None):
+    def forward(self, past, abs_past, seq_start_end, end_pose, destination=None, epoch=None, map_tensor=None):
+        map_feat = self._encode_map(map_tensor)
         if self.mode == 'Short_term':
-            past_state = self.traj_encoder_1(past)
+            past_state = self._apply_map_feat(self.traj_encoder_1(past), map_feat)
             feat = self.AR_Model(past_state, mask_type='causal')
             pred = self.predictor_1(feat)
             return pred
         elif self.mode == 'Des_warm' or self.mode == 'Long_term':
-            past_state = self.Traj_encoder(past)
+            past_state = self._apply_map_feat(self.Traj_encoder(past), map_feat)
             des_token = repeat(self.rand_token, '() n d -> b n d', b=past.size(0))
-            des_state = self.des_encoder(des_token)
+            des_state = self._apply_map_feat(self.des_encoder(des_token), map_feat)
             traj_state = torch.cat((past_state, des_state), dim=1)
             feat = self.AR_Model(traj_state)
             pred_des = self.predictor_Des(feat[:, -1])    # generate 20 destinations for each trajectory
             return pred_des.view(pred_des.size(0), 20, -1)
         elif self.mode == 'ALL':
             # First predict 20 destinations for each trajectory
-            past_state = self.Traj_encoder(past)
+            past_state = self._apply_map_feat(self.Traj_encoder(past), map_feat)
             des_token = repeat(self.rand_token, '() n d -> b n d', b=past.size(0))
-            des_state = self.des_encoder(des_token)
+            des_state = self._apply_map_feat(self.des_encoder(des_token), map_feat)
             traj_state = torch.cat((past_state, des_state), dim=1)
             feat = self.AR_Model(traj_state)
             pred_des = self.predictor_Des(feat[:, -1])
@@ -417,9 +462,9 @@ class Final_Model(nn.Module):
             fut_token = repeat(self.traj_rand_fut_token, '() n d -> b n d', b=past.size(0))
 
             # Then generate the remaining trajectory points
-            past_feat = self.traj_encoder(past)
+            past_feat = self._apply_map_feat(self.traj_encoder(past), map_feat)
             fut_feat = self.traj_fut_token_encoder(fut_token)
-            des_feat = self.traj_encoder(destination_prediction)
+            des_feat = self._apply_map_feat(self.traj_encoder(destination_prediction), map_feat)
             traj_feat = torch.cat((past_feat, fut_feat, des_feat.unsqueeze(1)), 1)
             prediction_feat = self.traj_trans_layer(traj_feat, mask_type='all')
             pre_prediction = self.traj_decoder_9(prediction_feat[:, self.past_len - 1:self.past_len])

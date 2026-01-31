@@ -99,8 +99,12 @@ class Trainer:
         fut_pred_best = []
 
         with torch.no_grad():
-            for _, (trajectory, mask, initial_pos, seq_start_end) in enumerate(dataset):
-                trajectory, mask, initial_pos = torch.FloatTensor(trajectory).to(self.device), torch.FloatTensor(mask).to(self.device), torch.FloatTensor(initial_pos).to(self.device)
+            for _, (trajectory, mask, initial_pos, seq_start_end, map_tensor) in enumerate(dataset):
+                trajectory = torch.FloatTensor(trajectory).to(self.device)
+                mask = torch.FloatTensor(mask).to(self.device)
+                initial_pos = torch.FloatTensor(initial_pos).to(self.device)
+                if map_tensor is not None:
+                    map_tensor = torch.FloatTensor(map_tensor).to(self.device)
 
                 traj_norm = trajectory - trajectory[:, self.config.past_len - 1:self.config.past_len, :]
                 x = traj_norm[:, :self.config.past_len, :]
@@ -111,7 +115,7 @@ class Trainer:
                 abs_past = trajectory[:, :self.config.past_len, :]
                 initial_pose = trajectory[:, self.config.past_len - 1:self.config.past_len, :]
                 
-                output = self.model(x, abs_past, seq_start_end, initial_pose)
+                output = self.model(x, abs_past, seq_start_end, initial_pose, map_tensor=map_tensor)
                 output = output.data
 
                 future_rep = traj_norm[:, 8:, :].unsqueeze(1).repeat(1, 20, 1, 1)

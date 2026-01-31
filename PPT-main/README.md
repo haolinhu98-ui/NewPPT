@@ -120,8 +120,9 @@ To use the JAAD/PIE datasets, prepare `train.pkl` and `test.pkl` (or `.npz`) und
   * `masks`: array shaped `[num_samples, num_agents, num_agents]` describing scene membership
   * `seq_start_end` (optional): list of `(start, end)` pairs per sample
   * `initial_pos` (optional): array shaped `[num_samples, num_agents, 2]`
+  * `maps` (optional): array shaped `[num_samples, C, H, W]` for semantic raster maps
 * **Tuple/List payload**:
-  * `(trajectories, masks)` or `(trajectories, masks, seq_start_end[, initial_pos])`
+  * `(trajectories, masks)` or `(trajectories, masks, seq_start_end[, initial_pos[, maps]])`
 
 If `seq_start_end` or `initial_pos` are not provided, they are derived automatically in the loader.
 Set `--dataset_name jaad` or `--dataset_name pie` and optionally override `--data_root` if your
@@ -142,6 +143,20 @@ python tools/prepare_jaad_pie.py \
 
 The CSV must include `scene_id`, `frame_id`, `track_id`, `x`, and `y` columns
 (rename via `--scene_col`, `--frame_col`, `--track_col`, `--x_col`, `--y_col`).
+
+#### JAAD XML to CSV helper (with image-size normalization)
+If you start from JAAD `annotations/*.xml`, use the helper below to produce the
+normalized CSV required by `prepare_jaad_pie.py`. The script reads `original_size`
+from each XML (or you can override via `--width/--height`).
+
+```linux
+python tools/jaad_xml_to_csv.py \
+  /path/to/JAAD/annotations \
+  --output_csv /path/to/jaad.csv
+```
+
+This generates a CSV with `scene_id`, `frame_id`, `track_id`, `x`, `y` columns
+where `x` and `y` are bbox centers normalized by image width/height.
 
 #### JAAD/PIE standard input format & normalization strategy
 **Standard input format (recommended):**
@@ -169,6 +184,17 @@ The CSV must include `scene_id`, `frame_id`, `track_id`, `x`, and `y` columns
 * For JAAD/PIE, keep coordinates in the image plane unless you have calibrated
   camera parameters to convert to world coordinates.
 * If you add vehicles later, use the same normalization policy for all agent types.
+
+#### Semantic raster map conditioning (optional)
+To enable semantic map conditioning, include a `maps` array in the JAAD/PIE payload
+with shape `[num_samples, C, H, W]` and run training/testing with:
+
+```linux
+python train_PPT.py --dataset_name jaad --use_semantic_map --map_channels C
+```
+
+The model uses a lightweight CNN encoder with global pooling to fuse map context
+into the trajectory encoder. Keep semantic maps normalized to `[0, 1]`.
 
 ### II. Training
 
