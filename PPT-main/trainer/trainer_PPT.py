@@ -290,8 +290,12 @@ class Trainer:
         samples = 0
         count = 0
         train_loss = 0.0
-        for _, (trajectory, mask, initial_pos, seq_start_end) in enumerate(self.train_loader):
-            trajectory, mask, initial_pos = torch.FloatTensor(trajectory).to(self.device), torch.FloatTensor(mask).to(self.device), torch.FloatTensor(initial_pos).to(self.device)
+        for _, (trajectory, mask, initial_pos, seq_start_end, map_tensor) in enumerate(self.train_loader):
+            trajectory = torch.FloatTensor(trajectory).to(self.device)
+            mask = torch.FloatTensor(mask).to(self.device)
+            initial_pos = torch.FloatTensor(initial_pos).to(self.device)
+            if map_tensor is not None:
+                map_tensor = torch.FloatTensor(map_tensor).to(self.device)
 
             traj_norm = trajectory - trajectory[:, self.config.past_len-1:self.config.past_len, :]
             x = traj_norm[:, :self.config.past_len, :]
@@ -305,13 +309,13 @@ class Trainer:
             self.opt.zero_grad()
 
             if self.config.mode == 'Short_term':
-                pred = self.model(traj_norm[:, :-1], abs_past, seq_start_end, initial_pose)
+                pred = self.model(traj_norm[:, :-1], abs_past, seq_start_end, initial_pose, map_tensor=map_tensor)
                 loss = self.criterionLoss(pred, traj_norm[:, 1:])
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0, norm_type=2)
                 self.opt.step()
             elif self.config.mode == 'Des_warm':
-                pred_des = self.model(x, abs_past, seq_start_end, initial_pose)
+                pred_des = self.model(x, abs_past, seq_start_end, initial_pose, map_tensor=map_tensor)
                 # print(self.criterionLoss(pred, gt), self.loss_function(pred_des, destination))
                 # print(self.criterionLoss(pred, gt), self.criterionLoss(pred_des, destination))
                 loss = self.loss_function(pred_des, destination)
@@ -320,7 +324,7 @@ class Trainer:
                 self.opt.step()
                 # print(pred_des.requires_grad, destination.requires_grad)
             elif self.config.mode == 'Long_term':
-                pred_des = self.model(x, abs_past, seq_start_end, initial_pose)
+                pred_des = self.model(x, abs_past, seq_start_end, initial_pose, map_tensor=map_tensor)
                 # loss = self.criterionLoss(pred, gt) + self.loss_function(pred_des, destination)
                 loss = self.loss_function(pred_des, destination)
                 loss.backward()
@@ -338,7 +342,15 @@ class Trainer:
                 des_feat = self.model_LT.AR_Model(torch.cat((past_state, des_state), dim=1))
 
                 # prediction results, trajectory and destination feature in Stage-III
-                pred_results, des_pred_feat, traj_pred_feat, pred_des = self.model(x, abs_past, seq_start_end, initial_pose, destination, epoch)
+                pred_results, des_pred_feat, traj_pred_feat, pred_des = self.model(
+                    x,
+                    abs_past,
+                    seq_start_end,
+                    initial_pose,
+                    destination,
+                    epoch,
+                    map_tensor=map_tensor,
+                )
 
                 loss = 0.0
                 pred = torch.cat((x[:, -1:], pred_results), 1)

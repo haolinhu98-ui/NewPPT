@@ -32,17 +32,29 @@ class Final_Model(nn.Module):
         self.traj_decoder = pretrained_model.traj_decoder
         self.traj_decoder_9 = pretrained_model.traj_decoder_9
         self.traj_decoder_20 = pretrained_model.traj_decoder_20
+        self.map_encoder = getattr(pretrained_model, "map_encoder", None)
 
         for p in self.parameters():
             p.requires_grad = False
 
 
-    def forward(self, past, abs_past, seq_start_end, end_pose):
+    def _encode_map(self, map_tensor):
+        if self.map_encoder is None or map_tensor is None:
+            return None
+        return self.map_encoder(map_tensor)
+
+    def _apply_map_feat(self, tokens, map_feat):
+        if map_feat is None:
+            return tokens
+        return tokens + map_feat.unsqueeze(1)
+
+    def forward(self, past, abs_past, seq_start_end, end_pose, map_tensor=None):
         predictions = torch.Tensor().cuda()
 
-        past_state = self.Traj_encoder(past)
+        map_feat = self._encode_map(map_tensor)
+        past_state = self._apply_map_feat(self.Traj_encoder(past), map_feat)
         des_token = repeat(self.rand_token, '() n d -> b n d', b=past.size(0))
-        des_state = self.des_encoder(des_token)
+        des_state = self._apply_map_feat(self.des_encoder(des_token), map_feat)
         traj_state = torch.cat((past_state, des_state), dim=1)
         feat = self.AR_Model(traj_state)
         pred_des = self.predictor_Des(feat[:, -1])
@@ -52,9 +64,9 @@ class Final_Model(nn.Module):
             fut_token = repeat(self.traj_rand_fut_token, '() n d -> b n d', b=past.size(0))
 
             # ----------- Block 1 --------------
-            past_feat = self.traj_encoder(past)
+            past_feat = self._apply_map_feat(self.traj_encoder(past), map_feat)
             fut_feat = self.traj_fut_token_encoder(fut_token)
-            des_feat = self.traj_encoder(destination_prediction[:, i])
+            des_feat = self._apply_map_feat(self.traj_encoder(destination_prediction[:, i]), map_feat)
             traj_feat = torch.cat((past_feat, fut_feat, des_feat.unsqueeze(1)), 1)
             prediction_feat = self.traj_trans_layer(traj_feat, mask_type='all')
 

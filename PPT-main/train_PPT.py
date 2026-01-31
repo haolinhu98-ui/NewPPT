@@ -41,6 +41,8 @@ def parse_config():
     parser.add_argument("--test_b_size", type=int, default=4096)
     parser.add_argument("--time_thresh", type=int, default=0)
     parser.add_argument("--dist_thresh", type=int, default=100)
+    parser.add_argument("--use_semantic_map", action="store_true", help="Enable semantic raster map conditioning.")
+    parser.add_argument("--map_channels", type=int, default=1, help="Number of channels in semantic raster maps.")
 
     # Transformer Decoder Param
     parser.add_argument("--n_layer", type=int, default=2)

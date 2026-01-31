@@ -125,7 +125,7 @@ class SocialDataset(data.Dataset):
 		mask = self.mask_batches[idx]
 		initial_pos = self.initial_pos_batches[idx]
 		seq_start_end = self.seq_start_end_batches[idx]
-		return np.array(trajectory), np.array(mask), np.array(initial_pos), np.array(seq_start_end)
+		return np.array(trajectory), np.array(mask), np.array(initial_pos), np.array(seq_start_end), None
 
 
 class JAADPIEDataset(data.Dataset):
@@ -148,10 +148,11 @@ class JAADPIEDataset(data.Dataset):
 				f"Expected {pkl_path} or {npz_path}."
 			)
 
-		trajectories, masks, seq_start_end, initial_pos = self._unpack_payload(payload)
+		trajectories, masks, seq_start_end, initial_pos, maps = self._unpack_payload(payload)
 
 		self.trajectory_batches = np.asarray(trajectories)
 		self.mask_batches = np.asarray(masks)
+		self.map_batches = np.asarray(maps) if maps is not None else None
 
 		if seq_start_end is None:
 			seq_start_end = build_seq_start_end_from_masks(self.mask_batches)
@@ -165,12 +166,13 @@ class JAADPIEDataset(data.Dataset):
 			print(f"Initialized {dataset_name.upper()} dataloader with {len(self.trajectory_batches)} samples.")
 
 	def _unpack_payload(self, payload):
-		trajectories = masks = seq_start_end = initial_pos = None
+		trajectories = masks = seq_start_end = initial_pos = maps = None
 		if isinstance(payload, dict):
 			trajectories = payload.get("trajectories")
 			masks = payload.get("masks")
 			seq_start_end = payload.get("seq_start_end")
 			initial_pos = payload.get("initial_pos")
+			maps = payload.get("maps") or payload.get("semantic_maps")
 		elif isinstance(payload, (list, tuple)):
 			if len(payload) >= 2:
 				trajectories, masks = payload[0], payload[1]
@@ -178,13 +180,15 @@ class JAADPIEDataset(data.Dataset):
 				seq_start_end = payload[2]
 			if len(payload) >= 4:
 				initial_pos = payload[3]
+			if len(payload) >= 5:
+				maps = payload[4]
 		else:
 			raise ValueError("Unsupported JAAD/PIE payload format. Use dict or tuple/list.")
 
 		if trajectories is None or masks is None:
 			raise ValueError("JAAD/PIE payload must include trajectories and masks.")
 
-		return trajectories, masks, seq_start_end, initial_pos
+		return trajectories, masks, seq_start_end, initial_pos, maps
 
 	def __len__(self):
 		return len(self.trajectory_batches)
@@ -194,7 +198,8 @@ class JAADPIEDataset(data.Dataset):
 		mask = self.mask_batches[idx]
 		initial_pos = self.initial_pos_batches[idx]
 		seq_start_end = self.seq_start_end_batches[idx]
-		return np.array(trajectory), np.array(mask), np.array(initial_pos), np.array(seq_start_end)
+		map_tensor = None if self.map_batches is None else self.map_batches[idx]
+		return np.array(trajectory), np.array(mask), np.array(initial_pos), np.array(seq_start_end), map_tensor
 
 
 def socialtraj_collate(batch):
@@ -202,9 +207,29 @@ def socialtraj_collate(batch):
 	mask = []
 	initial_pos = []
 	seq_start_end = []
+	maps = []
+	has_map = False
 	for _batch in batch:
 		trajectories.append(_batch[0])
 		mask.append(_batch[1])
 		initial_pos.append(_batch[2])
 		seq_start_end.append(_batch[3])
-	return torch.Tensor(trajectories).squeeze(0), torch.Tensor(mask).squeeze(0), torch.Tensor(initial_pos).squeeze(0), torch.tensor(seq_start_end ,dtype=torch.int32).squeeze(0)
+		map_tensor = _batch[4] if len(_batch) > 4 else None
+		if map_tensor is not None:
+			has_map = True
+		maps.append(map_tensor)
+
+	if has_map:
+		if any(m is None for m in maps):
+			raise ValueError("Semantic map tensors are missing for some samples in the batch.")
+		map_tensor = torch.Tensor(maps).squeeze(0)
+	else:
+		map_tensor = None
+
+	return (
+		torch.Tensor(trajectories).squeeze(0),
+		torch.Tensor(mask).squeeze(0),
+		torch.Tensor(initial_pos).squeeze(0),
+		torch.tensor(seq_start_end, dtype=torch.int32).squeeze(0),
+		map_tensor,
+	)
